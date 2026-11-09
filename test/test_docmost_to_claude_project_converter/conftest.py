@@ -33,7 +33,7 @@ FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
 
 HttpHandler = Callable[[httpx.Request], httpx.Response]
 BuildZip = Callable[[dict[str, str | bytes]], bytes]
-BuildDocmostClient = Callable[[HttpHandler], HttpxDocmostClient]
+BuildDocmostClient = Callable[..., HttpxDocmostClient]
 BuildClaudeClient = Callable[[HttpHandler], BrowserClaudeClient]
 ImportPages = Callable[[dict[str, str | bytes]], None]
 
@@ -342,11 +342,12 @@ def build_zip() -> BuildZip:
 
 @pytest.fixture()
 def build_docmost_client() -> BuildDocmostClient:
-    def build(handler: HttpHandler) -> HttpxDocmostClient:
+    def build(handler: HttpHandler, *, api_key: str | None = None) -> HttpxDocmostClient:
         return HttpxDocmostClient(
             "http://docmost.test",
-            "user@example.com",
-            "password",
+            api_key=api_key,
+            email="user@example.com",
+            password="password",
             transport=httpx.MockTransport(handler),
         )
 
