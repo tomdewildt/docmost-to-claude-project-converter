@@ -1,0 +1,50 @@
+[tools]
+python = "3.13"
+uv = "0.10.5"
+
+[tasks.init]
+description = "Initialize the environment"
+run = [
+    "uv sync",
+    "uv run patchright install --with-deps chromium",
+]
+
+[tasks.start]
+description = "Run the CLI"
+run = "uv run python -m docmost_to_claude_project_converter.cli"
+
+[tasks."docmost:start"]
+description = "Start the docmost server"
+run = "docker compose up -d"
+
+[tasks."docmost:logs"]
+description = "Show the docmost server logs"
+run = "docker compose logs -f"
+
+[tasks."docmost:stop"]
+description = "Stop the docmost server"
+run = "docker compose down"
+
+[tasks.lint]
+description = "Run lint check"
+run = "uv run ruff check src/ test/"
+
+[tasks.format]
+description = "Run format check"
+run = "uv run ruff format --check src/ test/"
+
+[tasks.types]
+description = "Run type check"
+run = "uv run pyright src/"
+
+[tasks.test]
+description = "Run all tests"
+run = "uv run pytest -m '' test/"
+
+[tasks."test:unit"]
+description = "Run unit tests"
+run = "uv run pytest test/"
+
+[tasks."test:integration"]
+description = "Run integration tests"
+run = "uv run pytest -m integration test/"
