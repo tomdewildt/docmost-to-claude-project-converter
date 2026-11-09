@@ -1,0 +1,32 @@
+services:
+  docmost:
+    image: docmost/docmost:0.95.0
+    container_name: docmost-to-claude-project-converter-app
+    environment:
+      APP_URL: http://localhost:3000
+      APP_SECRET: local-development-secret-do-not-use-in-production
+      DATABASE_URL: postgresql://docmost:docmost@postgres:5432/docmost
+      REDIS_URL: redis://redis:6379
+    ports:
+      - 3000:3000
+    volumes:
+      - ./.docker/docmost:/app/data/storage
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:18
+    container_name: docmost-to-claude-project-converter-db
+    environment:
+      POSTGRES_USER: docmost
+      POSTGRES_PASSWORD: docmost
+      POSTGRES_DB: docmost
+    volumes:
+      - ./.docker/postgres:/var/lib/postgresql
+
+  redis:
+    image: redis:8
+    container_name: docmost-to-claude-project-converter-redis
+    volumes:
+      - ./.docker/redis:/data
