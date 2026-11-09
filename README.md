@@ -18,7 +18,7 @@ Prerequisites:
 ### Development
 
 1. Run `mise run init` to initialize the environment.
-2. Copy `.env.example` to `.env` and configure the settings.
+2. Copy `.env.example` to `.env` and configure the settings. Set either `CONV_DOCMOST_API_KEY` or `CONV_DOCMOST_EMAIL` and `CONV_DOCMOST_PASSWORD`.
 3. Run `mise run start -- login` to sign in to Claude.
 4. Run `mise run start -- pull <page>` to export a page and its subpages to `data/output`.
 5. Run `mise run start -- push <project>` to upload `data/output` to a Claude project.
