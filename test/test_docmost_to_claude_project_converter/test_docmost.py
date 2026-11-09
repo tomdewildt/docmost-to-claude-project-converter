@@ -75,6 +75,24 @@ class TestExtractDocmostPageId:
         # Assert
         assert paths == ["/api/auth/login", "/api/pages/info", "/api/pages/info"]
 
+    def test_api_key_is_sent_as_bearer_token_instead_of_logging_in(
+        self, build_docmost_client: BuildDocmostClient
+    ) -> None:
+        # Arrange
+        requests: list[tuple[str, str | None]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append((request.url.path, request.headers.get("Authorization")))
+            return httpx.Response(200, json={"data": {"id": "id"}})
+
+        docmost_client = build_docmost_client(handler, api_key="secret")
+
+        # Act
+        docmost_client.get_page_id("page")
+
+        # Assert
+        assert requests == [("/api/pages/info", "Bearer secret")]
+
     def test_rejected_login_raises_without_requesting_the_page(self, build_docmost_client: BuildDocmostClient) -> None:
         # Arrange
         paths: list[str] = []
