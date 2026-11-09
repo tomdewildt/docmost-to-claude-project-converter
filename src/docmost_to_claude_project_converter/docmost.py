@@ -31,12 +31,22 @@ class DocmostClient(ABC):
 
 
 class HttpxDocmostClient(DocmostClient):
-    def __init__(self, url: str, email: str, password: str, *, transport: httpx.BaseTransport | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        api_key: str | None = None,
+        email: str | None = None,
+        password: str | None = None,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
         self._email = email
         self._password = password
 
-        self._client = httpx.Client(base_url=url, timeout=60, transport=transport)
-        self._is_authenticated = False
+        # API keys (business and enterprise licenses) replace the login
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else None
+        self._client = httpx.Client(base_url=url, timeout=60, transport=transport, headers=headers)
+        self._is_authenticated = api_key is not None
 
     def get_page_id(self, page_id_or_slug_id: str) -> str:
         return self._post("/api/pages/info", {"pageId": page_id_or_slug_id}).json()["data"]["id"]
@@ -65,8 +75,8 @@ class HttpxDocmostClient(DocmostClient):
         if self._is_authenticated:
             return
 
-        # The official Docmost API requires an enterprise license, but the page and export endpoints are part of the
-        # open-source core and accept the JWT cookie set by a regular login.
+        # Without an API key, the page and export endpoints of the open-source core accept the JWT cookie set by a
+        # regular login.
         response = self._client.post("/api/auth/login", json={"email": self._email, "password": self._password})
         response.raise_for_status()
 
@@ -74,4 +84,9 @@ class HttpxDocmostClient(DocmostClient):
 
 
 def create_docmost_client(config: ConverterConfig) -> DocmostClient:
-    return HttpxDocmostClient(config.DOCMOST_URL, config.DOCMOST_EMAIL, config.DOCMOST_PASSWORD)
+    return HttpxDocmostClient(
+        config.DOCMOST_URL,
+        api_key=config.DOCMOST_API_KEY,
+        email=config.DOCMOST_EMAIL,
+        password=config.DOCMOST_PASSWORD,
+    )
