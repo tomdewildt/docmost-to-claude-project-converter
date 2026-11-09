@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      CONV_DOCMOST_URL: http://localhost:3000
+      CONV_DOCMOST_EMAIL: ci@example.com
+      CONV_DOCMOST_PASSWORD: ci-password
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Install mise
+        uses: jdx/mise-action@v5
+
+      - name: Install dependencies
+        run: mise run init
+
+      - name: Run format
+        run: mise run format
+
+      - name: Run lint
+        run: mise run lint
+
+      - name: Run types
+        run: mise run types
+
+      - name: Run unit tests
+        run: mise run test:unit
+
+      - name: Setup docmost
+        run: mkdir -p .docker/docmost && chmod 777 .docker/docmost
+
+      - name: Start docmost
+        run: mise run docmost:start
+
+      - name: Provision docmost
+        run: |
+          curl --fail --silent --retry 60 --retry-delay 2 --retry-all-errors "$CONV_DOCMOST_URL/api/health"
+          curl --fail --silent --request POST "$CONV_DOCMOST_URL/api/auth/setup" --header "Content-Type: application/json" --data "{\"name\": \"CI\", \"email\": \"$CONV_DOCMOST_EMAIL\", \"password\": \"$CONV_DOCMOST_PASSWORD\", \"workspaceName\": \"CI\"}"
+
+      - name: Run integration tests
+        run: mise run test:integration
