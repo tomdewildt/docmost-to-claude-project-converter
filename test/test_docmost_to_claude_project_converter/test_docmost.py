@@ -119,3 +119,35 @@ class TestExtractDocmostPageId:
         # Act / Assert
         with pytest.raises(httpx.HTTPStatusError):
             docmost_client.get_page_id("missing")
+
+    def test_is_base_reads_the_base_flag_of_the_page(self, build_docmost_client: BuildDocmostClient) -> None:
+        # Arrange
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": {"id": "page", "isBase": True}})
+
+        docmost_client = build_docmost_client(handler, api_key="key")
+
+        # Act
+        is_base = docmost_client.is_base("page")
+
+        # Assert
+        assert is_base is True
+
+    def test_export_base_returns_the_csv_without_byte_order_mark(
+        self, build_docmost_client: BuildDocmostClient
+    ) -> None:
+        # Arrange
+        export_requests: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            export_requests.append({"path": request.url.path, **json.loads(request.content)})
+            return httpx.Response(200, content="﻿Name\nAlice\n".encode())
+
+        docmost_client = build_docmost_client(handler, api_key="key")
+
+        # Act
+        csv_text = docmost_client.export_base("page")
+
+        # Assert
+        assert csv_text == "Name\nAlice\n"
+        assert export_requests == [{"path": "/api/bases/export-csv", "pageId": "page"}]

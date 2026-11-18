@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -465,3 +466,75 @@ class TestConversionService:
             "Back to [the handbook](Handbook.md) or [elsewhere](Other.md)."
         )
         assert (output / "Team Notes.md").read_text() == "Notes and [site](https://example.com/page.md)."
+
+    def test_pull_renders_bases_as_markdown_tables(
+        self,
+        service: ConversionService,
+        fake_docmost_client: FakeDocmostClient,
+        build_zip: BuildZip,
+        tmp_path: Path,
+    ) -> None:
+        # Arrange
+        metadata = {"pages": {"My%20Hub.md": {"pageId": "hub"}, "My%20Hub/Users.md": {"pageId": "users"}}}
+        fake_docmost_client.exports = {
+            ("root", "markdown"): build_zip(
+                {
+                    "My Hub.md": "# Hub\n\n## 👤 Users\n\n---\n\n## Meetings\n\nNone",
+                    "My Hub/Users.md": "# Users",
+                    "docmost-metadata.json": json.dumps(metadata),
+                }
+            ),
+            ("root", "html"): build_zip(
+                {
+                    "My Hub.html": (
+                        '<h1>Hub</h1><h2 id="x">👤  <strong>Users</strong></h2><hr />'
+                        '<div data-page-id="users" data-type="base-embed"></div><h2>Meetings</h2><p>None</p>'
+                    ),
+                    "My Hub/Users.html": "<h1>Users</h1>",
+                }
+            ),
+        }
+        fake_docmost_client.base_csvs["users"] = 'Name,Role\nAlice,"Admin | Owner"\n"Bob, Jr.","Line 1\nLine 2"\n'
+
+        # Act
+        service.pull("root")
+
+        # Assert
+        users_table = "| Name | Role |\n| --- | --- |\n| Alice | Admin \\| Owner |\n| Bob, Jr. | Line 1<br>Line 2 |\n"
+        output = tmp_path / "output"
+        assert (output / "My Hub - Users.md").read_text() == f"# Users\n\n{users_table}"
+        assert (output / "My Hub.md").read_text() == (
+            f"# Hub\n\n## 👤 Users\n\n---\n\n{users_table}\n## Meetings\n\nNone"
+        )
+        assert ("is_base", "hub") not in fake_docmost_client.calls
+
+    def test_pull_renders_embedded_bases_as_html_tables_in_pdfs(
+        self,
+        service: ConversionService,
+        fake_docmost_client: FakeDocmostClient,
+        fake_pdf_renderer: FakePdfRenderer,
+        build_zip: BuildZip,
+    ) -> None:
+        # Arrange
+        metadata = {"pages": {"Hub.md": {"pageId": "hub"}, "Hub/Users.md": {"pageId": "users"}}}
+        fake_docmost_client.exports = {
+            ("root", "markdown"): build_zip(
+                {
+                    "Hub.md": "![x](files/x.png)",
+                    "Hub/Users.md": "# Users",
+                    "docmost-metadata.json": json.dumps(metadata),
+                }
+            ),
+            ("root", "html"): build_zip(
+                {"Hub.html": '<img><div data-page-id="users" data-type="base-embed"></div>', "Hub/Users.html": ""}
+            ),
+        }
+        fake_docmost_client.base_csvs["users"] = "Name\n<Alice>\n"
+
+        # Act
+        service.pull("root")
+
+        # Assert
+        assert fake_pdf_renderer.rendered_htmls == [
+            "<img><table><thead><tr><th>Name</th></tr></thead><tbody><tr><td>&lt;Alice&gt;</td></tr></tbody></table>"
+        ]

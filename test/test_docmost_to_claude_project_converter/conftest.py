@@ -41,6 +41,7 @@ ImportPages = Callable[[dict[str, str | bytes]], None]
 class FakeDocmostClient(DocmostClient):
     def __init__(self) -> None:
         self.exports: dict[tuple[str, ExportFormat], bytes] = {}
+        self.base_csvs: dict[str, str] = {}
         self.calls: list[tuple[str, ...]] = []
 
     def get_page_id(self, page_id_or_slug_id: str) -> str:
@@ -50,6 +51,14 @@ class FakeDocmostClient(DocmostClient):
     def export_page(self, page_id: str, export_format: ExportFormat) -> bytes:
         self.calls.append(("export_page", page_id, export_format))
         return self.exports[page_id, export_format]
+
+    def is_base(self, page_id: str) -> bool:
+        self.calls.append(("is_base", page_id))
+        return page_id in self.base_csvs
+
+    def export_base(self, page_id: str) -> str:
+        self.calls.append(("export_base", page_id))
+        return self.base_csvs[page_id]
 
 
 class FakeClaudeClient(ClaudeClient):
@@ -98,10 +107,12 @@ class FakePdfRenderer(PdfRenderer):
     def __init__(self) -> None:
         self.calls: list[Path] = []
         self.files_next_to_html: list[set[str]] = []
+        self.rendered_htmls: list[str] = []
 
     def render(self, html_path: Path) -> bytes:
         assert html_path.is_file()
         self.calls.append(html_path)
+        self.rendered_htmls.append(html_path.read_text())
         self.files_next_to_html.append(
             {file.relative_to(html_path.parent).as_posix() for file in html_path.parent.rglob("*") if file.is_file()}
         )
