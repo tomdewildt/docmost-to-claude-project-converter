@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import time
 import zipfile
@@ -41,6 +42,7 @@ ImportPages = Callable[[dict[str, str | bytes]], None]
 class FakeDocmostClient(DocmostClient):
     def __init__(self) -> None:
         self.exports: dict[tuple[str, ExportFormat], bytes] = {}
+        self.base_csvs: dict[str, str] = {}
         self.calls: list[tuple[str, ...]] = []
 
     def get_page_id(self, page_id_or_slug_id: str) -> str:
@@ -50,6 +52,14 @@ class FakeDocmostClient(DocmostClient):
     def export_page(self, page_id: str, export_format: ExportFormat) -> bytes:
         self.calls.append(("export_page", page_id, export_format))
         return self.exports[page_id, export_format]
+
+    def is_base(self, page_id: str) -> bool:
+        self.calls.append(("is_base", page_id))
+        return page_id in self.base_csvs
+
+    def export_base(self, page_id: str) -> str:
+        self.calls.append(("export_base", page_id))
+        return self.base_csvs[page_id]
 
 
 class FakeClaudeClient(ClaudeClient):
@@ -98,10 +108,12 @@ class FakePdfRenderer(PdfRenderer):
     def __init__(self) -> None:
         self.calls: list[Path] = []
         self.files_next_to_html: list[set[str]] = []
+        self.rendered_htmls: list[str] = []
 
     def render(self, html_path: Path) -> bytes:
         assert html_path.is_file()
         self.calls.append(html_path)
+        self.rendered_htmls.append(html_path.read_text())
         self.files_next_to_html.append(
             {file.relative_to(html_path.parent).as_posix() for file in html_path.parent.rglob("*") if file.is_file()}
         )
@@ -383,3 +395,47 @@ def docmost_markdown_export() -> bytes:
 @pytest.fixture()
 def docmost_html_export() -> bytes:
     return (FIXTURES_DIR / "docmost-export-html.zip").read_bytes()
+
+
+@pytest.fixture()
+def docmost_hub_markdown_export(build_zip: BuildZip) -> bytes:
+    metadata = {
+        "pages": {
+            "My%20Hub.md": {"pageId": "hub"},
+            "My%20Hub/Users.md": {"pageId": "users"},
+            "My%20Hub/Meetings.md": {"pageId": "meetings"},
+        }
+    }
+    return build_zip(
+        {
+            "My Hub.md": "# Hub\n\n## 👤 **Users & Roles**\n\nTeam members\n\n# Meetings\n\nNone",
+            "My Hub/Users.md": "# Users\n",
+            "My Hub/Meetings.md": "# Meetings\n",
+            "docmost-metadata.json": json.dumps(metadata),
+        }
+    )
+
+
+@pytest.fixture()
+def docmost_hub_html_export(build_zip: BuildZip) -> bytes:
+    return build_zip(
+        {
+            "My Hub.html": (
+                '<h1>Hub</h1><h2 id="x">👤  <strong>Users &amp; Roles</strong></h2><p>Team members</p>'
+                '<div data-page-id="users" data-type="base-embed"></div><h1>Meetings</h1><p>None</p>'
+                '<div data-page-id="meetings" data-type="base-embed"></div>'
+            ),
+            "My Hub/Users.html": "<h1>Users</h1>",
+            "My Hub/Meetings.html": "<h1>Meetings</h1>",
+        }
+    )
+
+
+@pytest.fixture()
+def users_base_csv() -> str:
+    return 'Name,Role\nAlice,"Admin | Owner"\n"Bob, Jr.","Line 1\nLine 2"\n'
+
+
+@pytest.fixture()
+def meetings_base_csv() -> str:
+    return "Date\n2026-11-18\n"

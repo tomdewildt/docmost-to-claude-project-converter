@@ -29,6 +29,12 @@ class DocmostClient(ABC):
     @abstractmethod
     def export_page(self, page_id: str, export_format: ExportFormat) -> bytes: ...
 
+    @abstractmethod
+    def is_base(self, page_id: str) -> bool: ...
+
+    @abstractmethod
+    def export_base(self, page_id: str) -> str: ...
+
 
 class HttpxDocmostClient(DocmostClient):
     def __init__(
@@ -62,6 +68,15 @@ class HttpxDocmostClient(DocmostClient):
         }
 
         return self._post("/api/pages/export", export_request).content
+
+    def is_base(self, page_id: str) -> bool:
+        return self._post("/api/pages/info", {"pageId": page_id}).json()["data"].get("isBase", False)
+
+    def export_base(self, page_id: str) -> str:
+        logger.info("Exporting base '{page_id}' as 'csv'", page_id=page_id)
+
+        # The csv starts with a byte order mark for spreadsheet apps.
+        return self._post("/api/bases/export-csv", {"pageId": page_id}).content.decode("utf-8-sig")
 
     def _post(self, path: str, body: dict[str, object]) -> httpx.Response:
         self._ensure_client_is_authenticated()

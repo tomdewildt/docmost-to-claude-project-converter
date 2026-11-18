@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -465,3 +466,65 @@ class TestConversionService:
             "Back to [the handbook](Handbook.md) or [elsewhere](Other.md)."
         )
         assert (output / "Team Notes.md").read_text() == "Notes and [site](https://example.com/page.md)."
+
+    def test_pull_renders_bases_as_markdown_tables(
+        self,
+        service: ConversionService,
+        fake_docmost_client: FakeDocmostClient,
+        tmp_path: Path,
+        docmost_hub_markdown_export: bytes,
+        docmost_hub_html_export: bytes,
+        users_base_csv: str,
+        meetings_base_csv: str,
+    ) -> None:
+        # Arrange
+        fake_docmost_client.exports = {
+            ("root", "markdown"): docmost_hub_markdown_export,
+            ("root", "html"): docmost_hub_html_export,
+        }
+        fake_docmost_client.base_csvs = {"users": users_base_csv, "meetings": meetings_base_csv}
+
+        # Act
+        service.pull("root")
+
+        # Assert
+        users_table = "| Name | Role |\n| --- | --- |\n| Alice | Admin \\| Owner |\n| Bob, Jr. | Line 1<br>Line 2 |"
+        meetings_table = "| Date |\n| --- |\n| 2026-11-18 |"
+        output = tmp_path / "output"
+        assert (output / "My Hub - Users.md").read_text() == f"# Users\n\n{users_table}\n"
+        assert (output / "My Hub.md").read_text() == (
+            f"# Hub\n\n## 👤 **Users & Roles**\n\nTeam members\n\n{users_table}\n\n"
+            f"# Meetings\n\nNone\n\n{meetings_table}\n"
+        )
+        assert ("is_base", "hub") not in fake_docmost_client.calls
+
+    def test_pull_renders_embedded_bases_as_html_tables_in_pdfs(
+        self,
+        service: ConversionService,
+        fake_docmost_client: FakeDocmostClient,
+        fake_pdf_renderer: FakePdfRenderer,
+        build_zip: BuildZip,
+    ) -> None:
+        # Arrange
+        metadata = {"pages": {"Hub.md": {"pageId": "hub"}, "Hub/Users.md": {"pageId": "users"}}}
+        fake_docmost_client.exports = {
+            ("root", "markdown"): build_zip(
+                {
+                    "Hub.md": "![x](files/x.png)",
+                    "Hub/Users.md": "# Users",
+                    "docmost-metadata.json": json.dumps(metadata),
+                }
+            ),
+            ("root", "html"): build_zip(
+                {"Hub.html": '<img><div data-page-id="users" data-type="base-embed"></div>', "Hub/Users.html": ""}
+            ),
+        }
+        fake_docmost_client.base_csvs["users"] = "Name\n<Alice>\n"
+
+        # Act
+        service.pull("root")
+
+        # Assert
+        assert fake_pdf_renderer.rendered_htmls == [
+            "<img><table><thead><tr><th>Name</th></tr></thead><tbody><tr><td>&lt;Alice&gt;</td></tr></tbody></table>"
+        ]
