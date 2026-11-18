@@ -122,7 +122,10 @@ class TestExtractDocmostPageId:
 
     def test_is_base_reads_the_base_flag_of_the_page(self, build_docmost_client: BuildDocmostClient) -> None:
         # Arrange
+        info_requests: list[dict] = []
+
         def handler(request: httpx.Request) -> httpx.Response:
+            info_requests.append({"path": request.url.path, **json.loads(request.content)})
             return httpx.Response(200, json={"data": {"id": "page", "isBase": True}})
 
         docmost_client = build_docmost_client(handler, api_key="key")
@@ -132,6 +135,7 @@ class TestExtractDocmostPageId:
 
         # Assert
         assert is_base is True
+        assert info_requests == [{"path": "/api/pages/info", "pageId": "page"}]
 
     def test_export_base_returns_the_csv_without_byte_order_mark(
         self, build_docmost_client: BuildDocmostClient

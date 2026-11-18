@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import time
 import zipfile
@@ -394,3 +395,47 @@ def docmost_markdown_export() -> bytes:
 @pytest.fixture()
 def docmost_html_export() -> bytes:
     return (FIXTURES_DIR / "docmost-export-html.zip").read_bytes()
+
+
+@pytest.fixture()
+def docmost_hub_markdown_export(build_zip: BuildZip) -> bytes:
+    metadata = {
+        "pages": {
+            "My%20Hub.md": {"pageId": "hub"},
+            "My%20Hub/Users.md": {"pageId": "users"},
+            "My%20Hub/Meetings.md": {"pageId": "meetings"},
+        }
+    }
+    return build_zip(
+        {
+            "My Hub.md": "# Hub\n\n## 👤 **Users & Roles**\n\nTeam members\n\n# Meetings\n\nNone",
+            "My Hub/Users.md": "# Users\n",
+            "My Hub/Meetings.md": "# Meetings\n",
+            "docmost-metadata.json": json.dumps(metadata),
+        }
+    )
+
+
+@pytest.fixture()
+def docmost_hub_html_export(build_zip: BuildZip) -> bytes:
+    return build_zip(
+        {
+            "My Hub.html": (
+                '<h1>Hub</h1><h2 id="x">👤  <strong>Users &amp; Roles</strong></h2><p>Team members</p>'
+                '<div data-page-id="users" data-type="base-embed"></div><h1>Meetings</h1><p>None</p>'
+                '<div data-page-id="meetings" data-type="base-embed"></div>'
+            ),
+            "My Hub/Users.html": "<h1>Users</h1>",
+            "My Hub/Meetings.html": "<h1>Meetings</h1>",
+        }
+    )
+
+
+@pytest.fixture()
+def users_base_csv() -> str:
+    return 'Name,Role\nAlice,"Admin | Owner"\n"Bob, Jr.","Line 1\nLine 2"\n'
+
+
+@pytest.fixture()
+def meetings_base_csv() -> str:
+    return "Date\n2026-11-18\n"

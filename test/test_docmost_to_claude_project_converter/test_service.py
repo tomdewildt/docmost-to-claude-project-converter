@@ -471,40 +471,30 @@ class TestConversionService:
         self,
         service: ConversionService,
         fake_docmost_client: FakeDocmostClient,
-        build_zip: BuildZip,
         tmp_path: Path,
+        docmost_hub_markdown_export: bytes,
+        docmost_hub_html_export: bytes,
+        users_base_csv: str,
+        meetings_base_csv: str,
     ) -> None:
         # Arrange
-        metadata = {"pages": {"My%20Hub.md": {"pageId": "hub"}, "My%20Hub/Users.md": {"pageId": "users"}}}
         fake_docmost_client.exports = {
-            ("root", "markdown"): build_zip(
-                {
-                    "My Hub.md": "# Hub\n\n## 👤 Users\n\n---\n\n## Meetings\n\nNone",
-                    "My Hub/Users.md": "# Users",
-                    "docmost-metadata.json": json.dumps(metadata),
-                }
-            ),
-            ("root", "html"): build_zip(
-                {
-                    "My Hub.html": (
-                        '<h1>Hub</h1><h2 id="x">👤  <strong>Users</strong></h2><hr />'
-                        '<div data-page-id="users" data-type="base-embed"></div><h2>Meetings</h2><p>None</p>'
-                    ),
-                    "My Hub/Users.html": "<h1>Users</h1>",
-                }
-            ),
+            ("root", "markdown"): docmost_hub_markdown_export,
+            ("root", "html"): docmost_hub_html_export,
         }
-        fake_docmost_client.base_csvs["users"] = 'Name,Role\nAlice,"Admin | Owner"\n"Bob, Jr.","Line 1\nLine 2"\n'
+        fake_docmost_client.base_csvs = {"users": users_base_csv, "meetings": meetings_base_csv}
 
         # Act
         service.pull("root")
 
         # Assert
-        users_table = "| Name | Role |\n| --- | --- |\n| Alice | Admin \\| Owner |\n| Bob, Jr. | Line 1<br>Line 2 |\n"
+        users_table = "| Name | Role |\n| --- | --- |\n| Alice | Admin \\| Owner |\n| Bob, Jr. | Line 1<br>Line 2 |"
+        meetings_table = "| Date |\n| --- |\n| 2026-11-18 |"
         output = tmp_path / "output"
-        assert (output / "My Hub - Users.md").read_text() == f"# Users\n\n{users_table}"
+        assert (output / "My Hub - Users.md").read_text() == f"# Users\n\n{users_table}\n"
         assert (output / "My Hub.md").read_text() == (
-            f"# Hub\n\n## 👤 Users\n\n---\n\n{users_table}\n## Meetings\n\nNone"
+            f"# Hub\n\n## 👤 **Users & Roles**\n\nTeam members\n\n{users_table}\n\n"
+            f"# Meetings\n\nNone\n\n{meetings_table}\n"
         )
         assert ("is_base", "hub") not in fake_docmost_client.calls
 
