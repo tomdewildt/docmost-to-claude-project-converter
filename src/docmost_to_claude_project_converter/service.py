@@ -38,7 +38,11 @@ _MARKDOWN_PAGE_LINK_PATTERN = re.compile(r"\[([^\]\n]*)\]\(([^)\s]+\.md)\)")
 
 # Base embedded in the html export: <div data-page-id="01a1ef78-..." data-type="base-embed"></div>
 _HTML_BASE_EMBED_PATTERN = re.compile(r"<div[^>]*data-type=\"base-embed\"[^>]*>\s*</div>")
+
+# Page id of the base inside a base embed: data-page-id="01a1ef78-..."
 _HTML_BASE_EMBED_PAGE_ID_PATTERN = re.compile(r"data-page-id=\"([^\"]+)\"")
+
+# Heading or base embed in the html export, in document order: <h2 id="x">Users</h2> or a base embed as above
 _HTML_HEADING_OR_BASE_EMBED_PATTERN = re.compile(
     rf"<h(?P<level>[1-6])[^>]*>(?P<text>.*?)</h(?P=level)>|{_HTML_BASE_EMBED_PATTERN.pattern}",
     re.DOTALL,
