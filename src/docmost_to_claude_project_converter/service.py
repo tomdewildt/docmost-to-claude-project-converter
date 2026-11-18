@@ -45,54 +45,6 @@ _HTML_HEADING_OR_BASE_EMBED_PATTERN = re.compile(
 )
 
 
-def _normalize_heading_text(heading_text: str) -> str:
-    # Html and markdown headings differ in tags, entities, emphasis markers and whitespace around emoji.
-    plain_text = unescape(re.sub(r"<[^>]+>", "", heading_text))
-    return " ".join(re.sub(r"[*_`]", "", plain_text).split())
-
-
-def _find_markdown_section_end(markdown_lines: list[str], heading: tuple[int, str] | None) -> int:
-    if heading is None:
-        return len(markdown_lines)
-
-    # ponytail: ignores code fences, a '# comment' line in a code block can end a section early.
-    level, text = heading
-    heading_index = next(
-        (
-            index
-            for index, line in enumerate(markdown_lines)
-            if line.startswith("#" * level + " ") and _normalize_heading_text(line[level + 1 :]) == text
-        ),
-        None,
-    )
-    if heading_index is None:
-        return len(markdown_lines)
-
-    next_heading_pattern = re.compile(rf"#{{1,{level}}} ")
-    return next(
-        (
-            index
-            for index in range(heading_index + 1, len(markdown_lines))
-            if next_heading_pattern.match(markdown_lines[index])
-        ),
-        len(markdown_lines),
-    )
-
-
-def _convert_csv_to_html_table(csv_text: str) -> str:
-    rows = [
-        ["<br>".join(escape(line) for line in cell.splitlines()) for cell in row]
-        for row in csv.reader(io.StringIO(csv_text))
-    ]
-    if not rows:
-        return ""
-
-    header, *body = rows
-    header_html = "".join(f"<th>{cell}</th>" for cell in header)
-    body_html = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in body)
-    return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
-
-
 class ConversionService:
     def __init__(
         self,
@@ -123,23 +75,23 @@ class ConversionService:
             if has_images or base_csv_by_page_id
             else {}
         )
-        markdown_by_page_path = self._add_base_tables(
+        markdown_with_base_tables_by_page_path = self._add_markdown_base_tables(
             markdown_by_page_path,
             page_id_by_page_path,
             base_csv_by_page_id,
             html_export,
         )
+        html_export_with_base_tables = self._add_html_base_tables(html_export, base_csv_by_page_id)
 
-        file_name_by_page_path = self._build_knowledge_file_names(markdown_by_page_path)
+        file_name_by_page_path = self._build_knowledge_file_names(markdown_with_base_tables_by_page_path)
         self._ensure_knowledge_file_names_are_unique(list(file_name_by_page_path.values()))
         self._ensure_knowledge_file_names_are_safe(list(file_name_by_page_path.values()))
 
-        markdown_files = self._build_markdown_files(markdown_by_page_path, file_name_by_page_path)
+        markdown_files = self._build_markdown_files(markdown_with_base_tables_by_page_path, file_name_by_page_path)
         pdf_files = self._build_pdf_files(
-            markdown_by_page_path,
+            markdown_with_base_tables_by_page_path,
             file_name_by_page_path,
-            html_export,
-            base_csv_by_page_id,
+            html_export_with_base_tables,
         )
 
         self._write_local_knowledge_files(markdown_files | pdf_files)
@@ -180,10 +132,13 @@ class ConversionService:
         with zipfile.ZipFile(io.BytesIO(markdown_export)) as archive:
             if _DOCMOST_METADATA_FILE_NAME not in archive.namelist():
                 return {}
-            pages = json.loads(archive.read(_DOCMOST_METADATA_FILE_NAME))["pages"]
+            page_metadata_by_page_path = json.loads(archive.read(_DOCMOST_METADATA_FILE_NAME))["pages"]
 
         # Unlike the zip entries, the metadata paths are url encoded: Customer%20Hubs/Users.md
-        return {unquote(page_path).removesuffix(".md"): page["pageId"] for page_path, page in pages.items()}
+        return {
+            unquote(page_path).removesuffix(".md"): page_metadata["pageId"]
+            for page_path, page_metadata in page_metadata_by_page_path.items()
+        }
 
     def _export_base_csvs(
         self,
@@ -198,7 +153,7 @@ class ConversionService:
         ]
         return {page_id: self._docmost_client.export_base(page_id) for page_id in base_page_ids}
 
-    def _add_base_tables(
+    def _add_markdown_base_tables(
         self,
         markdown_by_page_path: dict[str, str],
         page_id_by_page_path: dict[str, str],
@@ -206,67 +161,143 @@ class ConversionService:
         html_export: dict[str, bytes],
     ) -> dict[str, str]:
         base_table_by_page_id = {
-            page_id: self._convert_csv_to_markdown_table(csv_text) for page_id, csv_text in base_csv_by_page_id.items()
+            page_id: self._convert_csv_to_markdown_table(base_csv) for page_id, base_csv in base_csv_by_page_id.items()
         }
-        markdown_with_base_tables: dict[str, str] = {}
+        markdown_with_base_tables_by_page_path: dict[str, str] = {}
 
         for page_path, markdown in markdown_by_page_path.items():
             own_base_table = base_table_by_page_id.get(page_id_by_page_path.get(page_path, ""))
             if own_base_table is not None:
-                markdown_with_base_tables[page_path] = f"{markdown.strip()}\n\n{own_base_table}\n"
+                markdown_with_base_tables_by_page_path[page_path] = f"{markdown.strip()}\n\n{own_base_table}\n"
                 continue
 
             page_html = html_export.get(f"{page_path}.html", b"").decode()
-            markdown_with_base_tables[page_path] = self._insert_embedded_base_tables(
+            markdown_with_base_tables_by_page_path[page_path] = self._insert_embedded_base_tables(
                 markdown,
                 page_html,
                 base_table_by_page_id,
             )
 
-        return markdown_with_base_tables
+        return markdown_with_base_tables_by_page_path
 
-    @staticmethod
-    def _insert_embedded_base_tables(markdown: str, page_html: str, base_table_by_page_id: dict[str, str]) -> str:
+    def _insert_embedded_base_tables(
+        self,
+        markdown: str,
+        page_html: str,
+        base_table_by_page_id: dict[str, str],
+    ) -> str:
         markdown_lines = markdown.split("\n")
-        heading: tuple[int, str] | None = None
+        current_heading: tuple[int, str] | None = None
 
         # Walk the html in document order, so each base lands at the end of the markdown section it is embedded in.
-        for element in _HTML_HEADING_OR_BASE_EMBED_PATTERN.finditer(page_html):
-            if element.group("level"):
-                heading = (int(element.group("level")), _normalize_heading_text(element.group("text")))
+        for html_element in _HTML_HEADING_OR_BASE_EMBED_PATTERN.finditer(page_html):
+            if html_element.group("level"):
+                heading_text = self._normalize_heading_text(html_element.group("text"))
+                current_heading = (int(html_element.group("level")), heading_text)
                 continue
 
-            page_id = _HTML_BASE_EMBED_PAGE_ID_PATTERN.search(element.group(0))
-            base_table = base_table_by_page_id.get(page_id.group(1)) if page_id else None
+            base_page_id_match = _HTML_BASE_EMBED_PAGE_ID_PATTERN.search(html_element.group(0))
+            base_table = base_table_by_page_id.get(base_page_id_match.group(1)) if base_page_id_match else None
             if base_table is None:
                 continue
 
-            line_index = _find_markdown_section_end(markdown_lines, heading)
-            needs_blank_line = line_index > 0 and markdown_lines[line_index - 1].strip() != ""
-            markdown_lines[line_index:line_index] = ([""] if needs_blank_line else []) + [base_table, ""]
+            section_end_line_index = self._find_markdown_section_end_line_index(markdown_lines, current_heading)
+            should_insert_blank_line = (
+                section_end_line_index > 0 and markdown_lines[section_end_line_index - 1].strip() != ""
+            )
+            markdown_lines[section_end_line_index:section_end_line_index] = (
+                [""] if should_insert_blank_line else []
+            ) + [base_table, ""]
 
         return "\n".join(markdown_lines)
 
+    def _find_markdown_section_end_line_index(
+        self,
+        markdown_lines: list[str],
+        section_heading: tuple[int, str] | None,
+    ) -> int:
+        if section_heading is None:
+            return len(markdown_lines)
+
+        # ponytail: ignores code fences, a '# comment' line in a code block can end a section early.
+        heading_level, heading_text = section_heading
+        heading_line_index = next(
+            (
+                line_index
+                for line_index, markdown_line in enumerate(markdown_lines)
+                if markdown_line.startswith("#" * heading_level + " ")
+                and self._normalize_heading_text(markdown_line[heading_level + 1 :]) == heading_text
+            ),
+            None,
+        )
+        if heading_line_index is None:
+            return len(markdown_lines)
+
+        next_heading_pattern = re.compile(rf"#{{1,{heading_level}}} ")
+        return next(
+            (
+                line_index
+                for line_index in range(heading_line_index + 1, len(markdown_lines))
+                if next_heading_pattern.match(markdown_lines[line_index])
+            ),
+            len(markdown_lines),
+        )
+
     @staticmethod
-    def _replace_html_base_embeds_with_tables(page_html: str, base_csv_by_page_id: dict[str, str]) -> str:
+    def _normalize_heading_text(heading_text: str) -> str:
+        # Html and markdown headings differ in tags, entities, emphasis markers and whitespace around emoji.
+        plain_text = unescape(re.sub(r"<[^>]+>", "", heading_text))
+        return " ".join(re.sub(r"[*_`]", "", plain_text).split())
+
+    @staticmethod
+    def _convert_csv_to_markdown_table(base_csv: str) -> str:
+        csv_rows = [
+            ["<br>".join(cell.replace("|", "\\|").splitlines()) for cell in csv_row]
+            for csv_row in csv.reader(io.StringIO(base_csv))
+        ]
+        if not csv_rows:
+            return ""
+
+        header_cells, *body_rows = csv_rows
+        return "\n".join(
+            f"| {' | '.join(cells)} |" for cells in [header_cells, ["---"] * len(header_cells), *body_rows]
+        )
+
+    def _add_html_base_tables(
+        self,
+        html_export: dict[str, bytes],
+        base_csv_by_page_id: dict[str, str],
+    ) -> dict[str, bytes]:
+        return {
+            file_path: (
+                self._replace_html_base_embeds_with_tables(content.decode(), base_csv_by_page_id).encode()
+                if file_path.endswith(".html")
+                else content
+            )
+            for file_path, content in html_export.items()
+        }
+
+    def _replace_html_base_embeds_with_tables(self, page_html: str, base_csv_by_page_id: dict[str, str]) -> str:
         def convert_to_html_table(base_embed: re.Match[str]) -> str:
-            page_id = _HTML_BASE_EMBED_PAGE_ID_PATTERN.search(base_embed.group(0))
-            csv_text = base_csv_by_page_id.get(page_id.group(1)) if page_id else None
-            return _convert_csv_to_html_table(csv_text) if csv_text is not None else base_embed.group(0)
+            base_page_id_match = _HTML_BASE_EMBED_PAGE_ID_PATTERN.search(base_embed.group(0))
+            base_csv = base_csv_by_page_id.get(base_page_id_match.group(1)) if base_page_id_match else None
+            return self._convert_csv_to_html_table(base_csv) if base_csv is not None else base_embed.group(0)
 
         return _HTML_BASE_EMBED_PATTERN.sub(convert_to_html_table, page_html)
 
     @staticmethod
-    def _convert_csv_to_markdown_table(csv_text: str) -> str:
-        rows = [
-            ["<br>".join(cell.replace("|", "\\|").splitlines()) for cell in row]
-            for row in csv.reader(io.StringIO(csv_text))
+    def _convert_csv_to_html_table(base_csv: str) -> str:
+        csv_rows = [
+            ["<br>".join(escape(line) for line in cell.splitlines()) for cell in csv_row]
+            for csv_row in csv.reader(io.StringIO(base_csv))
         ]
-        if not rows:
+        if not csv_rows:
             return ""
 
-        header, *body = rows
-        return "\n".join(f"| {' | '.join(row)} |" for row in [header, ["---"] * len(header), *body])
+        header_cells, *body_rows = csv_rows
+        header_html = "".join(f"<th>{cell}</th>" for cell in header_cells)
+        body_html = "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>" for cells in body_rows)
+        return f"<table><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
 
     @staticmethod
     def _unzip_html_export(html_export: bytes) -> dict[str, bytes]:
@@ -356,7 +387,6 @@ class ConversionService:
         markdown_by_page_path: dict[str, str],
         file_name_by_page_path: dict[str, str],
         html_export: dict[str, bytes],
-        base_csv_by_page_id: dict[str, str],
     ) -> dict[str, bytes]:
         page_paths = [
             page_path
@@ -371,11 +401,6 @@ class ConversionService:
 
             # The browser that renders a page to pdf reads it from disk and needs its images next to it.
             for file_path, content in html_export.items():
-                if file_path.endswith(".html"):
-                    content = self._replace_html_base_embeds_with_tables(
-                        content.decode(),
-                        base_csv_by_page_id,
-                    ).encode()
                 destination = html_directory / file_path
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(content)
